@@ -19,6 +19,12 @@ export, and the PDF export.
 - Dark mode supported throughout; smart quotes disabled in the editor so
   Markdown syntax stays intact.
 
+## Install
+
+Download the DMG from the [latest release](https://github.com/r4nd0mth1ngs/MDness/releases),
+open it, and drag MDness into Applications. The app is ad-hoc signed (not
+notarized), so on first launch right-click the app and choose **Open**.
+
 ## Build
 
 ```sh
@@ -26,4 +32,4 @@ xcodebuild -project MDness.xcodeproj -scheme MDness -configuration Release build
 ```
 
 or open `MDness.xcodeproj` in Xcode and hit Run. Requires Xcode 16+ and
-macOS 14+.
+macOS 14+. `scripts/make-dmg.sh` builds the installer DMG into `dist/`.
