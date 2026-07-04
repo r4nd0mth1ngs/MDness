@@ -7,11 +7,12 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		A100000000000000000000A1 /* Markdown in Frameworks */ = {isa = PBXBuildFile; productRef = A100000000000000000000A2 /* Markdown */; };
+		A100000000000000000000C1 /* web in Resources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000C0 /* web */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		A100000000000000000000A4 /* MDness.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MDness.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A100000000000000000000C0 /* web */ = {isa = PBXFileReference; lastKnownFileType = folder; path = web; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -27,7 +28,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A100000000000000000000A1 /* Markdown in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -38,6 +38,7 @@
 			isa = PBXGroup;
 			children = (
 				A100000000000000000000A3 /* MDness */,
+				A100000000000000000000C0 /* web */,
 				A100000000000000000000A7 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -70,7 +71,6 @@
 			);
 			name = MDness;
 			packageProductDependencies = (
-				A100000000000000000000A2 /* Markdown */,
 			);
 			productName = MDness;
 			productReference = A100000000000000000000A4 /* MDness.app */;
@@ -99,9 +99,6 @@
 			);
 			mainGroup = A100000000000000000000A6;
 			minimizedProjectReferenceProxies = 1;
-			packageReferences = (
-				A100000000000000000000B2 /* XCRemoteSwiftPackageReference "swift-markdown" */,
-			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = A100000000000000000000A7 /* Products */;
 			projectDirPath = "";
@@ -117,6 +114,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A100000000000000000000C1 /* web in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -182,7 +180,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.2;
+				MARKETING_VERSION = 0.3;
 				PRODUCT_BUNDLE_IDENTIFIER = com.feher.MDness;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 5.0;
@@ -204,7 +202,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.2;
+				MARKETING_VERSION = 0.3;
 				PRODUCT_BUNDLE_IDENTIFIER = com.feher.MDness;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 5.0;
@@ -233,25 +231,6 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
-
-/* Begin XCRemoteSwiftPackageReference section */
-		A100000000000000000000B2 /* XCRemoteSwiftPackageReference "swift-markdown" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/swiftlang/swift-markdown.git";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 0.4.0;
-			};
-		};
-/* End XCRemoteSwiftPackageReference section */
-
-/* Begin XCSwiftPackageProductDependency section */
-		A100000000000000000000A2 /* Markdown */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = A100000000000000000000B2 /* XCRemoteSwiftPackageReference "swift-markdown" */;
-			productName = Markdown;
-		};
-/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = A100000000000000000000A9 /* Project object */;
 }

@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=MDness
+GenericName=Markdown Editor
+Comment=Minimal native Markdown viewer/editor with Mermaid, HTML and PDF export
+Exec=mdness %F
+Icon=mdness
+Terminal=false
+Categories=Office;Utility;TextEditor;
+MimeType=text/markdown;text/x-markdown;
+Keywords=markdown;md;editor;preview;mermaid;
+StartupNotify=true

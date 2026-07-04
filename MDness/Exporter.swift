@@ -4,24 +4,20 @@ import WebKit
 
 @MainActor
 enum Exporter {
-    static func exportHTML(markdown: String, title: String) {
+    static func exportHTML(markdown: String, title: String, baseURL: URL?) {
         runSavePanel(type: .html, suggestedName: title) { url in
-            let html = MarkdownRenderer.page(for: markdown, title: title)
-            do {
-                try html.write(to: url, atomically: true, encoding: .utf8)
-            } catch {
-                presentError(error)
+            let host = MarkdownRenderer.hostHTML(markdown: markdown, title: title, baseURL: baseURL)
+            WebExporter.export(hostHTML: host, job: .html(url, title: title)) { error in
+                if let error { presentError(error) }
             }
         }
     }
 
     static func exportPDF(markdown: String, title: String, baseURL: URL?) {
         runSavePanel(type: .pdf, suggestedName: title) { url in
-            let html = MarkdownRenderer.page(for: markdown, title: title, baseURL: baseURL)
-            PDFRenderer.render(html: html, to: url) { error in
-                if let error {
-                    presentError(error)
-                }
+            let host = MarkdownRenderer.hostHTML(markdown: markdown, title: title, baseURL: baseURL)
+            WebExporter.export(hostHTML: host, job: .pdf(url)) { error in
+                if let error { presentError(error) }
             }
         }
     }
@@ -51,34 +47,43 @@ enum Exporter {
     }
 }
 
-/// Renders HTML in an offscreen web view and runs a windowless print operation
-/// with a save-to-file job, producing a properly paginated PDF.
+/// Renders the host page in an offscreen web view, waits for markdown-it and
+/// Mermaid to finish (polling the `__mdnessRenderComplete` flag app.js sets),
+/// then either prints a paginated PDF or captures the rendered DOM as a
+/// self-contained static HTML file.
 @MainActor
-final class PDFRenderer: NSObject, WKNavigationDelegate {
-    private static var active = Set<PDFRenderer>()
+final class WebExporter: NSObject, WKNavigationDelegate {
+    enum Job {
+        case pdf(URL)
+        case html(URL, title: String)
+    }
+
+    private static var active = Set<WebExporter>()
 
     private let webView: WKWebView
     private let window: NSWindow
-    private let destination: URL
+    private let job: Job
     private let completion: @MainActor (Error?) -> Void
     private let tempFile: URL
+    private var pollCount = 0
+    private let maxPolls = 300 // ~15s at 50ms; Mermaid's first init can be slow.
 
-    static func render(html: String, to destination: URL, completion: @escaping @MainActor (Error?) -> Void) {
-        let renderer = PDFRenderer(destination: destination, completion: completion)
-        active.insert(renderer)
-        renderer.start(html: html)
+    static func export(hostHTML: String, job: Job, completion: @escaping @MainActor (Error?) -> Void) {
+        let exporter = WebExporter(job: job, completion: completion)
+        active.insert(exporter)
+        exporter.start(hostHTML: hostHTML)
     }
 
-    private init(destination: URL, completion: @escaping @MainActor (Error?) -> Void) {
+    private init(job: Job, completion: @escaping @MainActor (Error?) -> Void) {
         let configuration = WKWebViewConfiguration()
-        configuration.defaultWebpagePreferences.allowsContentJavaScript = false
+        configuration.defaultWebpagePreferences.allowsContentJavaScript = true
         configuration.websiteDataStore = .nonPersistent()
         let frame = NSRect(origin: .zero, size: NSPrintInfo().paperSize)
         webView = WKWebView(frame: frame, configuration: configuration)
         window = NSWindow(contentRect: frame, styleMask: .borderless, backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = webView
-        self.destination = destination
+        self.job = job
         self.completion = completion
         tempFile = FileManager.default.temporaryDirectory
             .appendingPathComponent("MDnessExport-\(UUID().uuidString).html")
@@ -86,9 +91,9 @@ final class PDFRenderer: NSObject, WKNavigationDelegate {
         webView.navigationDelegate = self
     }
 
-    private func start(html: String) {
+    private func start(hostHTML: String) {
         do {
-            try html.write(to: tempFile, atomically: true, encoding: .utf8)
+            try hostHTML.write(to: tempFile, atomically: true, encoding: .utf8)
         } catch {
             finish(with: error)
             return
@@ -97,10 +102,7 @@ final class PDFRenderer: NSObject, WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        // Give WebKit a beat to finish layout and image decoding before printing.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-            self?.printToPDF()
-        }
+        pollForRenderComplete()
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
@@ -111,7 +113,49 @@ final class PDFRenderer: NSObject, WKNavigationDelegate {
         finish(with: error)
     }
 
-    private func printToPDF() {
+    private func pollForRenderComplete() {
+        webView.evaluateJavaScript("window.__mdnessRenderComplete === true") { [weak self] result, _ in
+            guard let self else { return }
+            if (result as? Bool) == true {
+                self.performJob()
+            } else if self.pollCount >= self.maxPolls {
+                self.performJob() // Proceed anyway rather than hang forever.
+            } else {
+                self.pollCount += 1
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+                    self?.pollForRenderComplete()
+                }
+            }
+        }
+    }
+
+    private func performJob() {
+        switch job {
+        case .pdf(let url):
+            printToPDF(destination: url)
+        case .html(let url, let title):
+            captureHTML(destination: url, title: title)
+        }
+    }
+
+    private func captureHTML(destination: URL, title: String) {
+        webView.evaluateJavaScript("document.getElementById('content').outerHTML") { [weak self] result, error in
+            guard let self else { return }
+            guard let content = result as? String else {
+                self.finish(with: error ?? ExportError())
+                return
+            }
+            let page = MarkdownRenderer.exportPage(contentHTML: content, title: title)
+            do {
+                try page.write(to: destination, atomically: true, encoding: .utf8)
+                self.finish(with: nil)
+            } catch {
+                self.finish(with: error)
+            }
+        }
+    }
+
+    private func printToPDF(destination: URL) {
         let printInfo = NSPrintInfo()
         printInfo.jobDisposition = .save
         printInfo.dictionary().setValue(destination, forKey: NSPrintInfo.AttributeKey.jobSavingURL.rawValue)
@@ -140,7 +184,7 @@ final class PDFRenderer: NSObject, WKNavigationDelegate {
     @objc private func printOperation(_ operation: NSPrintOperation, didRun success: Bool, contextInfo: UnsafeMutableRawPointer?) {
         // NSPrintOperation can deliver this on a background thread.
         DispatchQueue.main.async {
-            self.finish(with: success ? nil : PDFExportError())
+            self.finish(with: success ? nil : ExportError())
         }
     }
 
@@ -151,6 +195,6 @@ final class PDFRenderer: NSObject, WKNavigationDelegate {
     }
 }
 
-struct PDFExportError: LocalizedError {
-    var errorDescription: String? { "The PDF could not be created." }
+struct ExportError: LocalizedError {
+    var errorDescription: String? { "The document could not be exported." }
 }

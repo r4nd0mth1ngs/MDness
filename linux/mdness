@@ -1,0 +1,559 @@
+#!/usr/bin/env python3
+# MDness — native Linux Markdown viewer/editor (GTK4 + WebKitGTK).
+# Shares its rendering pipeline (markdown-it + mermaid, in a WebKit view) and web
+# assets byte-for-byte with the macOS app. Single file, no bundled runtime.
+#
+# MIT © 2026 David Feher
+import json
+import os
+import sys
+
+# MDness only ever "prints" to a PDF file, never to a physical printer. Force
+# GTK's file print backend so PDF export works even without CUPS, and never
+# blocks on printer discovery. Must be set before GTK initializes printing.
+os.environ.setdefault("GTK_PRINT_BACKENDS", "file")
+
+import gi
+
+gi.require_version("Gtk", "4.0")
+gi.require_version("WebKit", "6.0")
+from gi.repository import Gtk, WebKit, Gio, GLib  # noqa: E402
+
+APP_ID = "com.feher.mdness"
+MARKUP_SUFFIXES = (".md", ".markdown", ".mdown", ".mkd")
+
+
+def schema_exists(schema_id):
+    """True if a GSettings schema is installed. Guards against Gio.Settings.new
+    aborting the process when the GNOME schema is absent (e.g. on KDE)."""
+    source = Gio.SettingsSchemaSource.get_default()
+    return bool(source and source.lookup(schema_id, True))
+
+
+# --- Shared rendering ------------------------------------------------------
+
+def find_web_dir():
+    """Locate the shared web assets (index.html, mermaid.min.js, ...)."""
+    candidates = []
+    env = os.environ.get("MDNESS_WEB_DIR")
+    if env:
+        candidates.append(env)
+    here = os.path.dirname(os.path.realpath(__file__))
+    # Installed layout: <prefix>/bin/mdness + <prefix>/share/mdness/web
+    candidates.append(os.path.join(os.path.dirname(here), "share", "mdness", "web"))
+    candidates.append("/usr/local/share/mdness/web")
+    candidates.append("/usr/share/mdness/web")
+    # Running from the repo: linux/mdness + ../web
+    candidates.append(os.path.join(os.path.dirname(here), "web"))
+    for path in candidates:
+        if path and os.path.isfile(os.path.join(path, "index.html")):
+            return path
+    raise SystemExit("MDness: could not find web assets; set MDNESS_WEB_DIR.")
+
+
+WEB_DIR = find_web_dir()
+
+
+def host_html(markdown, title, base_dir):
+    """Build the host page: Markdown baked into #md-source, rendered on load.
+    Identical in shape to the macOS app's MarkdownRenderer.hostHTML."""
+    with open(os.path.join(WEB_DIR, "index.html"), encoding="utf-8") as f:
+        template = f.read()
+    assets = "file://" + GLib.uri_escape_string(WEB_DIR, "/", False)
+    base = ""
+    if base_dir:
+        base = '<base href="file://%s/">' % GLib.uri_escape_string(base_dir, "/", False)
+    source = json.dumps(markdown).replace("<", "\\u003c")
+    return (template
+            .replace("{{BASE}}", base)
+            .replace("{{TITLE}}", GLib.markup_escape_text(title))
+            .replace("{{ASSETS}}", assets)
+            .replace("{{SOURCE}}", source))
+
+
+def export_page(content_html, title):
+    """Self-contained static page (inlined CSS, baked-in SVGs, no scripts)."""
+    with open(os.path.join(WEB_DIR, "mdness.css"), encoding="utf-8") as f:
+        css = f.read()
+    return (
+        "<!DOCTYPE html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n"
+        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
+        "<title>%s</title>\n<style>\n%s\n</style>\n</head>\n<body>\n%s\n</body>\n</html>\n"
+        % (GLib.markup_escape_text(title), css, content_html)
+    )
+
+
+# --- Main window -----------------------------------------------------------
+
+class MDnessWindow(Gtk.ApplicationWindow):
+    def __init__(self, app):
+        super().__init__(application=app, title="MDness")
+        self.set_default_size(900, 680)
+        self.file = None          # Gio.File or None
+        self.modified = False
+        self._preview_dirty = True
+        self._debounce_id = 0
+
+        # Header bar: view toggle + export menu.
+        header = Gtk.HeaderBar()
+        self.set_titlebar(header)
+
+        toggle_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        toggle_box.add_css_class("linked")
+        self.raw_btn = Gtk.ToggleButton(label="Raw")
+        self.fmt_btn = Gtk.ToggleButton(label="Formatted")
+        self.fmt_btn.set_group(self.raw_btn)
+        self.raw_btn.set_active(True)
+        self.raw_btn.connect("toggled", self.on_toggle_view)
+        toggle_box.append(self.raw_btn)
+        toggle_box.append(self.fmt_btn)
+        header.set_title_widget(toggle_box)
+
+        export_menu = Gio.Menu()
+        export_menu.append("Export as HTML…", "win.export-html")
+        export_menu.append("Export as PDF…", "win.export-pdf")
+        menu = Gio.Menu()
+        menu.append_section(None, export_menu)
+        misc = Gio.Menu()
+        misc.append("Install global shortcut…", "app.install-shortcut")
+        menu.append_section(None, misc)
+        menu_btn = Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu)
+        header.pack_end(menu_btn)
+
+        for icon, action in (("document-new-symbolic", "win.new"),
+                             ("document-open-symbolic", "win.open"),
+                             ("document-save-symbolic", "win.save")):
+            btn = Gtk.Button(icon_name=icon)
+            btn.set_action_name(action)
+            header.pack_start(btn)
+
+        # Content: editor / preview stack.
+        self.stack = Gtk.Stack()
+        self.stack.set_hexpand(True)
+        self.stack.set_vexpand(True)
+
+        self.buffer = Gtk.TextBuffer()
+        self.buffer.connect("changed", self.on_text_changed)
+        editor = Gtk.TextView(buffer=self.buffer)
+        editor.set_monospace(True)
+        editor.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        editor.set_left_margin(12)
+        editor.set_top_margin(12)
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_child(editor)
+        self.stack.add_named(scroll, "raw")
+
+        self.webview = WebKit.WebView()
+        ws = self.webview.get_settings()
+        ws.set_enable_javascript(True)
+        ws.set_allow_file_access_from_file_urls(True)
+        ws.set_allow_universal_access_from_file_urls(True)
+        self.stack.add_named(self.webview, "formatted")
+
+        self.set_child(self.stack)
+        self._install_actions(app)
+        self.update_title()
+
+    # -- actions --
+    def _install_actions(self, app):
+        for name, handler in (("new", self.act_new), ("open", self.act_open),
+                              ("save", self.act_save), ("save-as", self.act_save_as),
+                              ("export-html", self.act_export_html),
+                              ("export-pdf", self.act_export_pdf),
+                              ("toggle-view", self.act_toggle_view)):
+            action = Gio.SimpleAction.new(name, None)
+            action.connect("activate", handler)
+            self.add_action(action)
+
+    # -- editor state --
+    def text(self):
+        start, end = self.buffer.get_bounds()
+        return self.buffer.get_text(start, end, True)
+
+    def doc_title(self):
+        return self.file.get_basename().rsplit(".", 1)[0] if self.file else "Untitled"
+
+    def update_title(self):
+        name = self.file.get_basename() if self.file else "Untitled"
+        self.set_title(("● " if self.modified else "") + name + " — MDness")
+
+    def on_text_changed(self, _buffer):
+        self.modified = True
+        self.update_title()
+        self._preview_dirty = True
+        if self.stack.get_visible_child_name() == "formatted":
+            self._schedule_preview()
+
+    # -- view toggle --
+    def on_toggle_view(self, _btn):
+        formatted = self.fmt_btn.get_active()
+        self.stack.set_visible_child_name("formatted" if formatted else "raw")
+        if formatted and self._preview_dirty:
+            self.refresh_preview()
+
+    def act_toggle_view(self, *_):
+        self.raw_btn.set_active(self.fmt_btn.get_active())
+
+    def _schedule_preview(self):
+        if self._debounce_id:
+            GLib.source_remove(self._debounce_id)
+        self._debounce_id = GLib.timeout_add(250, self._debounced_preview)
+
+    def _debounced_preview(self):
+        self._debounce_id = 0
+        if self.stack.get_visible_child_name() == "formatted":
+            self.refresh_preview()
+        return GLib.SOURCE_REMOVE
+
+    def refresh_preview(self):
+        self._preview_dirty = False
+        base_dir = None
+        if self.file and self.file.get_path():
+            base_dir = os.path.dirname(self.file.get_path())
+        html = host_html(self.text(), self.doc_title(), base_dir)
+        self.webview.load_html(html, "file://" + WEB_DIR + "/")
+
+    # -- file ops --
+    def act_new(self, *_):
+        self.load_document(None, "")
+
+    def act_open(self, *_):
+        dialog = Gtk.FileDialog(title="Open Markdown")
+        dialog.set_default_filter(self._markdown_filter())
+        dialog.open(self, None, self._on_open_done)
+
+    def _on_open_done(self, dialog, result):
+        try:
+            gfile = dialog.open_finish(result)
+        except GLib.Error:
+            return
+        try:
+            data = gfile.load_contents(None)[1]
+            self.load_document(gfile, data.decode("utf-8"))
+        except (GLib.Error, UnicodeDecodeError) as e:
+            self._error("Could not open file", str(e))
+
+    def load_document(self, gfile, text):
+        self.file = gfile
+        self.buffer.set_text(text)
+        self.modified = False
+        self._preview_dirty = True
+        self.update_title()
+        if self.stack.get_visible_child_name() == "formatted":
+            self.refresh_preview()
+
+    def act_save(self, *_):
+        if self.file:
+            self._write(self.file)
+        else:
+            self.act_save_as()
+
+    def act_save_as(self, *_):
+        dialog = Gtk.FileDialog(title="Save Markdown")
+        dialog.set_initial_name((self.doc_title() or "Untitled") + ".md")
+        dialog.save(self, None, self._on_save_done)
+
+    def _on_save_done(self, dialog, result):
+        try:
+            gfile = dialog.save_finish(result)
+        except GLib.Error:
+            return
+        self._write(gfile)
+
+    def _write(self, gfile):
+        try:
+            gfile.replace_contents(self.text().encode("utf-8"), None, False,
+                                   Gio.FileCreateFlags.NONE, None)
+            self.file = gfile
+            self.modified = False
+            self.update_title()
+        except GLib.Error as e:
+            self._error("Could not save file", str(e))
+
+    # -- export --
+    def act_export_html(self, *_):
+        dialog = Gtk.FileDialog(title="Export as HTML")
+        dialog.set_initial_name(self.doc_title() + ".html")
+        dialog.save(self, None, lambda d, r: self._export_html_to(self._finish(d, r)))
+
+    def act_export_pdf(self, *_):
+        dialog = Gtk.FileDialog(title="Export as PDF")
+        dialog.set_initial_name(self.doc_title() + ".pdf")
+        dialog.save(self, None, lambda d, r: self._export_pdf_to(self._finish(d, r)))
+
+    def _finish(self, dialog, result):
+        try:
+            return dialog.save_finish(result)
+        except GLib.Error:
+            return None
+
+    def _export_html_to(self, gfile):
+        if not gfile:
+            return
+        Exporter(self, "html", gfile.get_path()).run()
+
+    def _export_pdf_to(self, gfile):
+        if not gfile:
+            return
+        Exporter(self, "pdf", gfile.get_path()).run()
+
+    # -- helpers --
+    def _markdown_filter(self):
+        f = Gtk.FileFilter()
+        f.set_name("Markdown")
+        for suffix in MARKUP_SUFFIXES:
+            f.add_suffix(suffix.lstrip("."))
+        return f
+
+    def _error(self, primary, secondary):
+        dialog = Gtk.AlertDialog()
+        dialog.set_message(primary)
+        dialog.set_detail(secondary)
+        dialog.show(self)
+
+
+# --- Export (offscreen render → PDF / captured HTML) -----------------------
+
+# Retain in-flight exporters; otherwise the WebView and print operation are
+# garbage-collected when the caller returns and their async signals never fire.
+_active_exporters = set()
+
+
+class Exporter:
+    """Renders the host page in an offscreen WebView, waits for markdown-it and
+    Mermaid to finish, then prints a PDF or captures the rendered DOM as static
+    HTML. Mirrors the macOS WebExporter."""
+
+    def __init__(self, window, kind, dest_path, on_done=None):
+        self.window = window
+        self.kind = kind
+        self.dest = dest_path
+        self._on_done = on_done or (lambda ok: None)
+        self._finished = False
+        self.polls = 0
+        self.webview = WebKit.WebView()
+        ws = self.webview.get_settings()
+        ws.set_enable_javascript(True)
+        ws.set_allow_file_access_from_file_urls(True)
+        ws.set_allow_universal_access_from_file_urls(True)
+        self.webview.connect("load-changed", self._on_load)
+
+    def on_done(self, ok):
+        """Fire the completion callback at most once (a print op can emit both
+        'finished' and 'failed')."""
+        if self._finished:
+            return
+        self._finished = True
+        _active_exporters.discard(self)
+        self._on_done(ok)
+
+    def run(self, markdown=None, title=None, base_dir=None):
+        _active_exporters.add(self)
+        if markdown is None:
+            markdown = self.window.text()
+            title = self.window.doc_title()
+            if self.window.file and self.window.file.get_path():
+                base_dir = os.path.dirname(self.window.file.get_path())
+        self.title = title
+        self.webview.load_html(host_html(markdown, title, base_dir), "file://" + WEB_DIR + "/")
+
+    def _on_load(self, webview, event):
+        if event == WebKit.LoadEvent.FINISHED:
+            self._poll()
+
+    def _poll(self):
+        self.webview.evaluate_javascript(
+            "window.__mdnessRenderComplete === true", -1, None, None, None,
+            self._on_poll, None)
+
+    def _on_poll(self, webview, result, _data):
+        done = False
+        try:
+            value = webview.evaluate_javascript_finish(result)
+            done = value.to_boolean()
+        except GLib.Error:
+            done = True
+        if done or self.polls >= 300:
+            self._perform()
+        else:
+            self.polls += 1
+            GLib.timeout_add(50, lambda: (self._poll(), GLib.SOURCE_REMOVE)[1])
+
+    def _perform(self):
+        if self.kind == "pdf":
+            self._print_pdf()
+        else:
+            self.webview.evaluate_javascript(
+                "document.getElementById('content').outerHTML", -1, None, None,
+                None, self._on_capture, None)
+
+    def _on_capture(self, webview, result, _data):
+        try:
+            content = webview.evaluate_javascript_finish(result).to_string()
+            with open(self.dest, "w", encoding="utf-8") as f:
+                f.write(export_page(content, self.title))
+            self.on_done(True)
+        except (GLib.Error, OSError) as e:
+            self.window._error("Could not export HTML", str(e)) if self.window else None
+            self.on_done(False)
+
+    @staticmethod
+    def _file_printer_name():
+        """Name of the file print backend's virtual printer. Its display name is
+        localized (e.g. 'In Datei drucken'), so discover it rather than hardcode.
+        With GTK_PRINT_BACKENDS=file it is the only printer enumerated."""
+        found = []
+
+        def collect(printer, _data):
+            found.append(printer.get_name())
+            return True  # stop at the first printer
+        try:
+            Gtk.enumerate_printers(collect, None, None, True)
+        except Exception:
+            pass
+        return found[0] if found else "Print to File"
+
+    def _print_pdf(self):
+        print_op = WebKit.PrintOperation.new(self.webview)
+        settings = Gtk.PrintSettings()
+        # Select the file backend's printer explicitly; without a named printer
+        # (and with no default/CUPS) print() fails with "Printer not found".
+        settings.set(Gtk.PRINT_SETTINGS_PRINTER, self._file_printer_name())
+        settings.set(Gtk.PRINT_SETTINGS_OUTPUT_URI,
+                     GLib.filename_to_uri(os.path.abspath(self.dest), None))
+        settings.set(Gtk.PRINT_SETTINGS_OUTPUT_FILE_FORMAT, "pdf")
+        page_setup = Gtk.PageSetup()
+        page_setup.set_top_margin(15, Gtk.Unit.MM)
+        page_setup.set_bottom_margin(15, Gtk.Unit.MM)
+        page_setup.set_left_margin(12, Gtk.Unit.MM)
+        page_setup.set_right_margin(12, Gtk.Unit.MM)
+        print_op.set_print_settings(settings)
+        print_op.set_page_setup(page_setup)
+        print_op.connect("finished", lambda _op: self.on_done(True))
+        print_op.connect("failed", self._on_print_failed)
+        self._print_op = print_op  # keep alive until the signal fires
+        # PyGObject exposes the C `print` method as `print` on Py3, `print_` on older bindings.
+        run = getattr(print_op, "print", None) or getattr(print_op, "print_")
+        run()
+
+    def _on_print_failed(self, _op, err):
+        if self.window:
+            self.window._error("Could not export PDF", err.message)
+        else:
+            sys.stderr.write("MDness PDF export failed: %s\n" % err.message)
+        self.on_done(False)
+
+
+# --- Application -----------------------------------------------------------
+
+class MDnessApp(Gtk.Application):
+    def __init__(self):
+        super().__init__(application_id=APP_ID,
+                         flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE)
+        self.window = None
+        self._exit_code = 0
+
+    def do_startup(self):
+        Gtk.Application.do_startup(self)
+        for name, handler in (("install-shortcut", self.on_install_shortcut),):
+            action = Gio.SimpleAction.new(name, None)
+            action.connect("activate", handler)
+            self.add_action(action)
+        accels = {
+            "win.new": ["<Primary>n"], "win.open": ["<Primary>o"],
+            "win.save": ["<Primary>s"], "win.save-as": ["<Primary><Shift>s"],
+            "win.toggle-view": ["<Primary><Shift>p"],
+        }
+        for action, keys in accels.items():
+            self.set_accels_for_action(action, keys)
+
+    def ensure_window(self):
+        if not self.window:
+            self.window = MDnessWindow(self)
+        return self.window
+
+    def do_command_line(self, command_line):
+        args = command_line.get_arguments()[1:]
+        # Headless export hooks (used for testing on Linux).
+        if "--export-pdf" in args or "--export-html" in args:
+            return self._headless_export(args)
+        if "--install-shortcut" in args:
+            i = args.index("--install-shortcut")
+            accel = args[i + 1] if i + 1 < len(args) else "<Control><Alt>space"
+            self.install_shortcut(accel, command_line)
+            return 0
+        window = self.ensure_window()
+        files = [a for a in args if not a.startswith("-")]
+        if files:
+            path = command_line.get_cwd()
+            gfile = Gio.File.new_for_commandline_arg_and_cwd(files[0], path)
+            try:
+                data = gfile.load_contents(None)[1].decode("utf-8")
+                window.load_document(gfile, data)
+            except (GLib.Error, UnicodeDecodeError):
+                pass
+        window.present()  # --summon and normal launch both raise the window
+        return 0
+
+    def _headless_export(self, args):
+        self.hold()
+        kind = "pdf" if "--export-pdf" in args else "html"
+        flag = "--export-pdf" if kind == "pdf" else "--export-html"
+        i = args.index(flag)
+        src, dest = args[i + 1], args[i + 2]
+        with open(src, encoding="utf-8") as f:
+            markdown = f.read()
+        title = os.path.basename(src).rsplit(".", 1)[0]
+
+        def done(ok):
+            self._exit_code = 0 if ok else 1
+            self.release()
+            self.quit()
+
+        exporter = Exporter(None, kind, dest, on_done=done)
+        exporter.run(markdown, title, os.path.dirname(os.path.abspath(src)))
+        return 0
+
+    def on_install_shortcut(self, *_):
+        self.install_shortcut("<Control><Alt>space", None)
+
+    def install_shortcut(self, accel, command_line):
+        """Bind a GNOME custom keyboard shortcut to `mdness --summon`."""
+        base = "org.gnome.settings-daemon.plugins.media-keys"
+        path = "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/mdness/"
+        if not schema_exists(base):
+            msg = ("GNOME shortcut settings not found. On KDE/other desktops, bind a "
+                   "shortcut to `%s` in your keyboard settings." % self._summon_command())
+            command_line.print_literal(msg + "\n") if command_line else print(msg)
+            return
+        try:
+            media = Gio.Settings.new(base)
+            existing = list(media.get_strv("custom-keybindings"))
+            if path not in existing:
+                existing.append(path)
+                media.set_strv("custom-keybindings", existing)
+            kb = Gio.Settings.new_with_path(base + ".custom-keybinding", path)
+            kb.set_string("name", "Summon MDness")
+            kb.set_string("command", self._summon_command())
+            kb.set_string("binding", accel)
+            msg = "Bound %s to summon MDness (GNOME)." % accel
+        except GLib.Error as e:
+            msg = "Could not install shortcut: %s\nSee README for KDE/other desktops." % e
+        if command_line:
+            command_line.print_literal(msg + "\n")
+        else:
+            print(msg)
+
+    def _summon_command(self):
+        exe = os.path.realpath(sys.argv[0])
+        return "%s --summon" % exe
+
+
+def main():
+    app = MDnessApp()
+    app.run(sys.argv)
+    return app._exit_code
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

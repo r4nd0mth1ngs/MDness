@@ -62,7 +62,11 @@ struct ContentView: View {
     }
 
     private func exportHTML() {
-        Exporter.exportHTML(markdown: document.text, title: documentTitle)
+        Exporter.exportHTML(
+            markdown: document.text,
+            title: documentTitle,
+            baseURL: fileURL?.deletingLastPathComponent()
+        )
     }
 
     private func exportPDF() {

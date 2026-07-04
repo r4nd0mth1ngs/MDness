@@ -1,0 +1,32 @@
+:root { color-scheme: light dark; }
+body { font: 15px/1.6 -apple-system, system-ui, "Segoe UI", Roboto, sans-serif; margin: 0; }
+article { max-width: 46rem; margin: 0 auto; padding: 2.5rem 1.5rem 4rem; }
+h1, h2 { border-bottom: 1px solid rgba(128, 128, 128, 0.3); padding-bottom: 0.3em; }
+a { color: rgb(9, 105, 218); }
+@media (prefers-color-scheme: dark) { a { color: rgb(82, 156, 255); } }
+code, pre { font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; font-size: 0.88em; }
+code { background: rgba(128, 128, 128, 0.16); border-radius: 4px; padding: 0.15em 0.35em; }
+pre { background: rgba(128, 128, 128, 0.12); border-radius: 8px; padding: 0.9em 1.1em; overflow-x: auto; line-height: 1.45; }
+pre code { background: none; padding: 0; }
+blockquote { margin: 0 0 1em; padding: 0 1em; border-left: 3px solid rgba(128, 128, 128, 0.4); color: rgb(110, 119, 129); }
+@media (prefers-color-scheme: dark) { blockquote { color: rgb(139, 148, 158); } }
+table { border-collapse: collapse; margin-bottom: 1em; display: block; overflow-x: auto; }
+th, td { border: 1px solid rgba(128, 128, 128, 0.35); padding: 0.35em 0.7em; }
+th { background: rgba(128, 128, 128, 0.12); }
+img { max-width: 100%; }
+hr { border: none; border-top: 1px solid rgba(128, 128, 128, 0.3); margin: 2em 0; }
+li > p { margin: 0.25em 0; }
+li.task-item { list-style: none; margin-left: -1.3em; }
+li.task-item > input[type="checkbox"] { margin-right: 0.4em; }
+/* Mermaid: rendered as a centered SVG; hide the raw source before it renders. */
+pre.mermaid { background: none; padding: 0; text-align: center; line-height: normal; }
+pre.mermaid:not([data-processed]) { color: transparent; }
+pre.mermaid svg { max-width: 100%; height: auto; }
+.mermaid-error { color: rgb(207, 34, 46); background: rgba(207, 34, 46, 0.08); border: 1px solid rgba(207, 34, 46, 0.3); border-radius: 8px; padding: 0.9em 1.1em; white-space: pre-wrap; }
+@media print {
+    :root { color-scheme: light; }
+    article { max-width: none; padding: 0; }
+    pre { white-space: pre-wrap; }
+    pre.mermaid { white-space: normal; }
+    a { color: inherit; }
+}

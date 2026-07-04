@@ -1,10 +1,10 @@
 import SwiftUI
 import WebKit
 
-/// The formatted view. The rendered page is written to a temp file and loaded
-/// with `loadFileURL` (rather than `loadHTMLString`) so WKWebView is allowed to
-/// read local images referenced by the document, resolved via the page's
-/// `<base>` tag against the document's folder.
+/// The formatted view. The host page is written to a temp file and loaded with
+/// `loadFileURL` (rather than `loadHTMLString`) so WKWebView is allowed to read
+/// the bundled web assets (markdown-it, mermaid, CSS) and any local images the
+/// document references, resolved via the page's `<base>` tag.
 struct MarkdownPreview: NSViewRepresentable {
     let markdown: String
     let fileURL: URL?
@@ -15,7 +15,8 @@ struct MarkdownPreview: NSViewRepresentable {
 
     func makeNSView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
-        configuration.defaultWebpagePreferences.allowsContentJavaScript = false
+        // JavaScript renders Markdown and Mermaid diagrams in-page.
+        configuration.defaultWebpagePreferences.allowsContentJavaScript = true
         // Local content only — nothing to persist, and a persistent store left
         // locked by a crashed instance can hang all subsequent page loads.
         configuration.websiteDataStore = .nonPersistent()
@@ -23,8 +24,8 @@ struct MarkdownPreview: NSViewRepresentable {
     }
 
     func updateNSView(_ webView: WKWebView, context: Context) {
-        let html = MarkdownRenderer.page(
-            for: markdown,
+        let html = MarkdownRenderer.hostHTML(
+            markdown: markdown,
             title: fileURL?.lastPathComponent ?? "Preview",
             baseURL: fileURL?.deletingLastPathComponent()
         )

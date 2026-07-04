@@ -1,0 +1,21 @@
+# Maintainer: David Feher
+pkgname=mdness
+pkgver=0.3
+pkgrel=1
+pkgdesc="Minimal native Markdown viewer/editor with Mermaid, HTML and PDF export"
+arch=('any')
+url="https://github.com/r4nd0mth1ngs/MDness"
+license=('MIT')
+depends=('python-gobject' 'gtk4' 'webkitgtk-6.0')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+package() {
+    cd "$srcdir/MDness-$pkgver"
+    install -Dm755 linux/mdness "$pkgdir/usr/bin/mdness"
+    install -d "$pkgdir/usr/share/mdness/web"
+    cp web/* "$pkgdir/usr/share/mdness/web/"
+    install -Dm644 linux/mdness.desktop "$pkgdir/usr/share/applications/mdness.desktop"
+    install -Dm644 linux/mdness.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/mdness.png"
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
