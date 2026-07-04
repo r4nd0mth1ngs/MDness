@@ -16,6 +16,10 @@ export, and the PDF export.
   Relative image paths resolve against the document's folder.
 - **Export** — File → *Export as HTML…* (self-contained page, light/dark aware)
   and *Export as PDF…* (paginated). Also available from the toolbar share menu.
+- **Global hotkey** — summon MDness from anywhere with **fn + Space**. Enable it
+  in MDness → Settings…; macOS will ask once for Accessibility access (required
+  to listen for the key system-wide). Pair it with "Start MDness at login" so
+  the shortcut always works.
 - Dark mode supported throughout; smart quotes disabled in the editor so
   Markdown syntax stays intact.
 
@@ -32,4 +36,9 @@ xcodebuild -project MDness.xcodeproj -scheme MDness -configuration Release build
 ```
 
 or open `MDness.xcodeproj` in Xcode and hit Run. Requires Xcode 16+ and
-macOS 14+. `scripts/make-dmg.sh` builds the installer DMG into `dist/`.
+macOS 14+. `scripts/make-dmg.sh` builds the installer DMG into `dist/`;
+`scripts/make-icon.sh` regenerates the app icon.
+
+## License
+
+MIT © 2026 David Feher — see [LICENSE](LICENSE).

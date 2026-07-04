@@ -28,6 +28,10 @@ struct MDnessApp: App {
                 Divider()
             }
         }
+
+        Settings {
+            SettingsView()
+        }
     }
 }
 
@@ -63,6 +67,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// AppKit tries to open unrecognized arguments as documents and blocks on a
     /// modal error alert.
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Restore the global hotkey silently; if Accessibility permission was
+        // revoked the user can re-enable it from Settings.
+        if UserDefaults.standard.bool(forKey: "globalHotkeyEnabled") {
+            HotkeyManager.shared.enable()
+        }
+
         let environment = ProcessInfo.processInfo.environment
         guard let inputPath = environment["MDNESS_EXPORT_PDF_INPUT"],
               let outputPath = environment["MDNESS_EXPORT_PDF_OUTPUT"] else { return }
