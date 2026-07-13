@@ -1,6 +1,6 @@
 [package]
 name = "mdness"
-version = "0.4.0"
+version = "0.4.1"
 description = "A minimal, native Markdown viewer/editor for Windows"
 authors = ["David Feher"]
 edition = "2021"

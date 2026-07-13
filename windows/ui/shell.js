@@ -4,8 +4,12 @@
 // native glue the SwiftUI/GTK shells provide on the other platforms.
 "use strict";
 
-const { open, save } = window.__TAURI__.dialog;
-const { invoke } = window.__TAURI__.core;
+// Access window.__TAURI__ lazily (inside handlers), never at top level: with
+// withGlobalTauri it isn't populated yet while this script's top-level code runs
+// (tauri#12990). These wrappers only touch it when a button is clicked.
+const invoke = (cmd, args) => window.__TAURI__.core.invoke(cmd, args);
+const openDialog = (opts) => window.__TAURI__.dialog.open(opts);
+const saveDialog = (opts) => window.__TAURI__.dialog.save(opts);
 
 const editor = document.getElementById("editor");
 const content = document.getElementById("content");
@@ -61,7 +65,7 @@ function loadDocument(path, text) {
 async function doNew() { loadDocument(null, ""); }
 
 async function doOpen() {
-  const path = await open({ filters: [MD_FILTER], multiple: false });
+  const path = await openDialog({ filters: [MD_FILTER], multiple: false });
   if (!path) return;
   try {
     loadDocument(path, await invoke("read_file", { path }));
@@ -83,7 +87,7 @@ async function doSave() {
 }
 
 async function doSaveAs() {
-  const path = await save({ defaultPath: docTitle() + ".md", filters: [MD_FILTER] });
+  const path = await saveDialog({ defaultPath: docTitle() + ".md", filters: [MD_FILTER] });
   if (path) await writeTo(path);
 }
 
@@ -102,7 +106,7 @@ function renderForExport() {
 }
 
 async function exportHtml() {
-  const path = await save({
+  const path = await saveDialog({
     defaultPath: docTitle() + ".html",
     filters: [{ name: "HTML", extensions: ["html"] }],
   });
