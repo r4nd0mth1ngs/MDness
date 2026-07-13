@@ -1,0 +1,46 @@
+/* Windows app-shell chrome only. The rendered document itself is styled by the
+   shared vendor/mdness.css, identical to macOS and Linux. */
+html, body { height: 100%; margin: 0; }
+body { display: flex; flex-direction: column; font: 13px system-ui, sans-serif; }
+
+#toolbar {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  padding: 6px 10px;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.3);
+  background: Canvas;
+  color: CanvasText;
+}
+#toolbar .group { display: flex; }
+#toolbar button {
+  font: inherit;
+  padding: 4px 10px;
+  border: 1px solid rgba(128, 128, 128, 0.4);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+#toolbar .group button + button { margin-left: 6px; }
+#toolbar .seg button + button { margin-left: -1px; }  /* linked segmented look */
+#toolbar .seg button.active { background: rgba(128, 128, 128, 0.25); font-weight: 600; }
+#toolbar button:hover { background: rgba(128, 128, 128, 0.15); }
+
+main { flex: 1; min-height: 0; position: relative; }
+#editor {
+  width: 100%; height: 100%;
+  box-sizing: border-box;
+  border: 0; resize: none; outline: none;
+  padding: 12px;
+  font: 13px ui-monospace, "Cascadia Code", Consolas, monospace;
+  background: Canvas; color: CanvasText;
+}
+#content { height: 100%; overflow: auto; padding: 12px 20px; box-sizing: border-box; }
+[hidden] { display: none !important; }
+
+/* PDF export goes through the browser print path; show only the document. */
+@media print {
+  #toolbar, #editor { display: none !important; }
+  #content { height: auto; overflow: visible; padding: 0; }
+  #content[hidden] { display: block !important; }
+}

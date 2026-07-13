@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MDness</title>
+<link rel="stylesheet" href="vendor/mdness.css">
+<link rel="stylesheet" href="shell.css">
+</head>
+<body>
+<header id="toolbar">
+  <div class="group">
+    <button id="new" title="New (Ctrl+N)">New</button>
+    <button id="open" title="Open (Ctrl+O)">Open</button>
+    <button id="save" title="Save (Ctrl+S)">Save</button>
+  </div>
+  <div class="group seg" id="view-toggle">
+    <button id="raw" class="active">Raw</button>
+    <button id="formatted">Formatted</button>
+  </div>
+  <div class="group">
+    <button id="export-html">Export HTML…</button>
+    <button id="export-pdf">Export PDF…</button>
+  </div>
+</header>
+<main>
+  <textarea id="editor" spellcheck="false"></textarea>
+  <article id="content" hidden></article>
+</main>
+<!-- app.js renders #md-source on load; empty JSON string keeps it a no-op. -->
+<script id="md-source" type="application/json">""</script>
+<script src="vendor/markdown-it.min.js"></script>
+<script src="vendor/mermaid.min.js"></script>
+<script src="vendor/app.js"></script>
+<script src="shell.js"></script>
+</body>
+</html>

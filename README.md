@@ -1,15 +1,17 @@
 # MDness
 
-A minimal, native Markdown viewer/editor for **macOS and Linux**. No Electron,
-no configuration. Built on the YAGNI principle: a single rendering pipeline
-(Markdown → HTML → WebKit) powers the formatted view, the HTML export and the
-PDF export — and it is shared byte-for-byte between both platforms.
+A minimal, native Markdown viewer/editor for **macOS, Linux and Windows**. No
+Electron, no configuration. Built on the YAGNI principle: a single rendering
+pipeline (Markdown → HTML → WebView) powers the formatted view, the HTML export
+and the PDF export — and it is shared byte-for-byte across every platform.
 
 - **macOS** — SwiftUI + WKWebView (Apple Silicon + Intel universal).
 - **Linux** — one ~500-line Python file on GTK4 + WebKitGTK. No bundled runtime;
   depends only on system libraries. Targets Ubuntu 24.04+ and Arch.
+- **Windows** — a thin [Tauri](https://tauri.app) v2 shell over WebView2 (the
+  preinstalled Edge runtime). No bundled browser. See [`windows/`](windows/).
 
-Both share the same web assets (`web/`): [markdown-it](https://github.com/markdown-it/markdown-it)
+All share the same web assets (`web/`): [markdown-it](https://github.com/markdown-it/markdown-it)
 for GitHub-flavored rendering and [Mermaid](https://mermaid.js.org/) for diagrams.
 
 ## Features
@@ -63,6 +65,12 @@ custom shortcut that runs `mdness --summon` in your keyboard settings. (There is
 no portable "fn+Space" on Linux — `fn` is a hardware key the compositor doesn't
 see.)
 
+### Windows
+
+Requires the WebView2 runtime (preinstalled on Win10 21H2+/Win11). Build from
+source with the Tauri toolchain — see [`windows/README.md`](windows/README.md).
+Installers (`.exe` / `.msi`) land in `windows/src-tauri/target/release/bundle/`.
+
 ## Build (macOS)
 
 ```sh
@@ -76,9 +84,10 @@ macOS 14+. `scripts/make-dmg.sh` builds the installer DMG into `dist/`;
 ## Repository layout
 
 ```
-web/            Shared rendering assets (markdown-it, mermaid, CSS, glue) — used by both apps
+web/            Shared rendering assets (markdown-it, mermaid, CSS, glue) — used by every app
 MDness/         macOS SwiftUI sources
 linux/          Linux app (single-file Python), packaging, icon
+windows/        Windows app (Tauri v2 + WebView2): src-tauri/ (Rust) + ui/ (shell)
 scripts/        macOS DMG + icon build scripts
 ```
 

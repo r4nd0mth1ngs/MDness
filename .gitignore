@@ -5,3 +5,8 @@ xcuserdata/
 .DS_Store
 __pycache__/
 *.pyc
+# Tauri (Windows) build artifacts + generated/copied files
+windows/src-tauri/target/
+windows/src-tauri/gen/
+windows/src-tauri/icons/
+windows/ui/vendor/

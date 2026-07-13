@@ -1,0 +1,37 @@
+name: release
+
+# Build the Windows installer on tag push and attach it to the GitHub release.
+# We can't cross-build a Windows/WebView2 target from macOS or Linux, so CI does
+# it on windows-latest. macOS/Linux ship from source / a locally built DMG.
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    permissions:
+      contents: write # create the release and upload the installer
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: windows/src-tauri
+
+      # Icons are generated (gitignored), so produce them from the shared PNG
+      # before the build — generate_context! needs them at compile time.
+      - name: Generate app icons
+        run: npx --yes @tauri-apps/cli@^2 icon linux/mdness.png --output windows/src-tauri/icons
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: windows
+          tagName: ${{ github.ref_name }}
+          releaseName: MDness ${{ github.ref_name }}
+          releaseDraft: true # publish it yourself after checking the installer
+          prerelease: false
